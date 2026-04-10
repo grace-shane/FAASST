@@ -1,42 +1,169 @@
-Technical Requirements: Machining Speed \& Feed API (SaaS)1. Project OverviewThe goal is to build a centralized SaaS API that provides optimized cutting parameters ($V\_c$, $f\_z$) based on ISO 13399 tool geometry and ISO 513 material groups. The system will leverage scraped manufacturer data as a "Source of Truth" and apply a physics-based logic layer for real-world machining environments.2. Core Data Architecture (The "Golden Record")All scraped data must be normalized into a standard schema. We will utilize ISO 13399 keys for interoperability with modern CAM/PLM systems.A. Tool Geometry (ISO 13399 Mapping)KeyDescriptionStandard MappingDCCutting Diameterhand\_tool\_diameterZEFPEffective Cutting Edgesflute\_countRECorner Radiustip\_radiusFHAFlute Helix Anglehelix\_angleLUUsable Lengthreach\_lengthB. Material Groups (ISO 513)To ensure the API is "searchable," we must map proprietary brand material names (e.g., "P2.1") to a universal standard:P (Steel)M (Stainless Steel)K (Cast Iron)N (Non-ferrous/Aluminium)S (HRSA/Titanium)H (Hardened Steel)3. The Scraping PipelineSince manufacturer data is unstructured (PDFs, JS-heavy SPAs), the scraper needs a multi-stage approach.Orchestration: Node.js with Playwright/Puppeteer to navigate catalogs and handle dynamic content.Extraction: Vision-capable LLM (Gemini 1.5 Pro / GPT-4o) to ingest table screenshots and output structured JSON.Validation: Cross-reference extracted DC and ZEFP against the manufacturer's master SKU list to ensure data integrity.4. Backend Strategy (Supabase \& Logic)We will utilize Supabase (PostgreSQL) for data storage and pgvector for material matching.Database Tables:dim\_tools: Static geometry based on SKU.fact\_cutting\_data: Raw $V\_c$ and $f\_z$ ranges from catalogs.ref\_materials: A vector-enabled table for mapping "User Input Material" to "Catalog Material Group."The Physics Engine (The "Value Add"):The API shouldn't just return raw numbers. It must calculate Adjusted Parameters:Radial Chip Thinning: If $a\_e < 50\\%$, the API must increase the programmed feed rate to maintain the target chip thickness ($h\_x$).Swiss-specific Logic: Support for Reverse Turning (pulling away from guide bushing) and small-diameter high-RPM limiters.Unit Agnostic: Input/Output must support both Metric ($m/min$, $mm/rev$) and Imperial ($SFM$, $IPT$).5. API Endpoints (Draft)POST /v1/calculateInput:JSON{
+﻿# FAASST — Machining Speed & Feed API (SaaS)
 
-&#x20; "sku": "ABC-123",
+🚀 **FAASST** is a modern SaaS API that generates optimized cutting parameters for milling and turning tools. It turns messy manufacturer catalog data into reliable, production-ready recommendations.
 
-&#x20; "material": "4140 Steel",
+---
 
-&#x20; "hardness\_hrc": 28,
+## 1. Overview
 
-&#x20; "strategy": {
+This service provides a single source of truth for:
 
-&#x20;   "type": "side\_milling",
+- **Cutting speed** (`V_c`)
+- **Feed per tooth** (`f_z`)
+- **RPM** and **feed rate**
+- **Surface speed** and **chip load** adjustments
 
-&#x20;   "ae": 1.5,
+Built on:
 
-&#x20;   "ap": 12.0
+- ISO 13399 tool geometry
+- ISO 513 material groups
+- Manufacturer catalogs as the authoritative data source
+- Physics-based machining logic
 
-&#x20; }
+---
 
+## 2. Core Data Architecture — Golden Record
+
+All scraped data is normalized into a standardized schema for interoperability with CAM/PLM systems.
+
+### A. Tool Geometry (ISO 13399)
+
+| Key | Description | Standard Field |
+|---|---|---|
+| `DC` | Cutting diameter | `hand_tool_diameter` |
+| `ZEFP` | Effective cutting edges | `flute_count` |
+| `RE` | Corner radius | `tip_radius` |
+| `FHA` | Flute helix angle | `helix_angle` |
+| `LU` | Usable length | `reach_length` |
+
+### B. Material Groups (ISO 513)
+
+We map proprietary material codes (e.g. `P2.1`) to universal groups:
+
+- `P` — Steel
+- `M` — Stainless Steel
+- `K` — Cast Iron
+- `N` — Non-ferrous / Aluminum
+- `S` — HRSA / Titanium
+- `H` — Hardened Steel
+
+---
+
+## 3. Scraping Pipeline
+
+Manufacturer catalogs are often unstructured and dynamic, so the pipeline uses multiple stages to ensure accuracy.
+
+- **Orchestration**: Node.js with Playwright/Puppeteer for JS-heavy pages
+- **Extraction**: Vision-capable LLM (Gemini 1.5 Pro / GPT-4o) to parse images and tables into structured JSON
+- **Validation**: Cross-check extracted values against manufacturer SKU data
+
+---
+
+## 4. Backend Strategy — Supabase + Logic
+
+The backend uses Supabase/PostgreSQL with `pgvector` for advanced material matching.
+
+### Primary tables
+
+- `dim_tools` — static tool geometry per SKU
+- `fact_cutting_data` — raw catalog ranges for `V_c` and `f_z`
+- `ref_materials` — vector-enabled mapping for user materials to catalog groups
+
+### Physics-driven logic
+
+The API calculates more than raw numbers:
+
+- **Radial chip thinning** adjustments when `a_e < 50%`
+- **Swiss turning support** for guide bushing / reverse-turning constraints
+- **Unit-agnostic outputs**: metric and imperial support (`m/min`, `mm/rev`, `SFM`, `IPT`)
+
+---
+
+## 5. API Draft
+
+### POST `/v1/calculateInput`
+
+Request example:
+
+```json
+{
+  "sku": "ABC-123",
+  "material": "4140 Steel",
+  "hardness_hrc": 28,
+  "strategy": {
+    "type": "side_milling",
+    "ae": 1.5,
+    "ap": 12.0
+  }
 }
+```
 
-Output:JSON{
+Response example:
 
-&#x20; "recommendation": {
-
-&#x20;   "speed\_rpm": 4500,
-
-&#x20;   "feed\_ipm": 62.5,
-
-&#x20;   "surface\_speed\_sfm": 589,
-
-&#x20;   "feed\_per\_tooth": 0.0035,
-
-&#x20;   "chip\_load\_adjusted": true,
-
-&#x20;   "logic\_notes": "Increased feed by 15% due to radial chip thinning."
-
-&#x20; }
-
+```json
+{
+  "recommendation": {
+    "speed_rpm": 4500,
+    "feed_ipm": 62.5,
+    "surface_speed_sfm": 589,
+    "feed_per_tooth": 0.0035,
+    "chip_load_adjusted": true,
+    "logic_notes": "Increased feed by 15% due to radial chip thinning."
+  }
 }
+```
 
-6\. Next Steps for DevelopmentData Audit: Review existing Supabase records and map them to the new ISO 13399 schema.Scraper MVP: Build a Playwright script for one major manufacturer (e.g., Sandvik or Kennametal) to test the Vision-to-JSON extraction reliability.Material Rosetta Stone: Create the initial pgvector material library to handle the "dirty" material names found in catalogs.Lead Engineer: Shane V WaidStandard: ISO 13399 / GTC Compliant
+---
+
+## 6. Project Roadmap
+
+Read the roadmap and actionable TODO list in [TODO.md](TODO.md).
+
+---
+
+## 7. Team & Standards
+
+- **Lead Engineer**: Shane V Waid
+- **Standards**: ISO 13399 / GTC compliant
+
+---
+
+## 8. Why FAASST?
+
+FAASST makes tooling data searchable, consistent, and ready for automated machining decision-making.
+
+---
+
+## 9. Getting Started
+
+1. **Clone the repo**
+
+```bash
+git clone https://github.com/your-org/FAASST.git
+cd FAASST
+```
+
+2. **Install dependencies**
+
+```bash
+npm install
+```
+
+3. **Configure environment**
+
+Create a `.env` file with your Supabase URL, service key, and any scraping credentials.
+
+4. **Run the API locally**
+
+```bash
+npm run dev
+```
+
+5. **Test the endpoint**
+
+Send a POST request to `/v1/calculateInput` with the example payload in the API Draft section.
+
+6. **Extend the pipeline**
+
+Start by adding one manufacturer scraper, then connect the extracted JSON into the Supabase schema.
 
